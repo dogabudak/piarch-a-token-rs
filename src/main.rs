@@ -1,0 +1,117 @@
+#![feature(proc_macro_hygiene, decl_macro)]
+
+#[macro_use] extern crate rocket;
+
+use rocket::Outcome;
+use rocket::http::Status;
+use rocket::request::{self, Request, FromRequest};
+use once_cell::sync::OnceCell;
+use mongodb::{bson::{Document,doc}, options::ClientOptions, sync::{Client,Database}};
+use serde::{Serialize, Deserialize};
+use jsonwebtoken::{encode, decode, Header, Algorithm, Validation, EncodingKey, DecodingKey};
+static MONGODB: OnceCell<Database> = OnceCell::new();
+
+struct Token(String);
+
+#[derive(Debug)]
+enum TokenError {
+    BadCount,
+    Missing,
+    Invalid,
+}
+// TODO split these functions into different module
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    sub: String,
+    company: String,
+    exp: usize,
+}
+
+pub fn initialize() {
+    if MONGODB.get().is_some() {
+        return;
+    }
+    let connection_string= "mongodb://localhost:27017";
+        if let Ok(client_options) =  ClientOptions::parse(connection_string) {
+            if let Ok(client) = Client::with_options(client_options) {
+                let _ = MONGODB.set(client.database("piarka"));
+            }
+        }
+}
+fn create_token(username: String) -> String {
+    let credential_sub = username.clone();
+    let my_claims= Claims{sub:credential_sub,company: "piarch_a".parse().unwrap(), exp: 10 * 60 * 60};
+    let token = encode(&Header::new(Algorithm::RS256), &my_claims, &EncodingKey::from_rsa_pem(include_bytes!("./piarch_a.pem")).unwrap()).unwrap();
+    print!("{}",token.clone());
+    return token;
+}
+fn validate_token(user: String, password: String) -> Result<String, TokenError> {
+    let database = MONGODB.get().unwrap();
+    let username = user.clone();
+    let collection = database.collection::<Document>("users");
+    let filter = doc! {"username": username};
+    let document = collection.find_one(filter,None).unwrap();
+    let db_result = return match document {
+        Some(document) => {
+            let token_sub = user.clone();
+            Ok(create_token(token_sub))
+        },
+        _ => Err(TokenError::Invalid)
+    };
+}
+fn evaluate_credentials(credentials: &str) -> Result<String, TokenError> {
+
+    let mut authorize_header =  credentials.split( " ");
+    let header_count = authorize_header.clone().count();
+    let header_size: i32 = 2;
+
+    if header_count as i32 != header_size {
+        return Err(TokenError::BadCount)
+    }
+
+    let method = authorize_header.next().unwrap();
+    let encoded_user_pass = authorize_header.next().unwrap();
+
+    let mut user_info_fields = encoded_user_pass.split(":");
+    let user_info_length = user_info_fields.clone().count();
+    let user_info_size: i32 = 2;
+
+    if user_info_length as i32 != user_info_size {
+        return Err(TokenError::BadCount)
+    }
+    let user = user_info_fields.next().unwrap();
+    let password = user_info_fields.next().unwrap();
+
+    let normalized_user = user.to_lowercase();
+    let normalized_password = password.to_lowercase();
+    let result = validate_token(normalized_user,normalized_password);
+    Ok(result.unwrap())
+}
+
+impl<'a, 'r> FromRequest<'a, 'r> for Token {
+    type Error = TokenError;
+
+    fn from_request(request: &'a Request<'r>) -> request::Outcome<Self, Self::Error> {
+        let credentials = request.headers().get_one("authorize");
+        match credentials {
+            Some(credentials) => {
+              let validated_token = evaluate_credentials(credentials);
+                match validated_token{
+                    Ok(result) => Outcome::Success(Token(result)),
+                    Err(e)=> Outcome::Failure((Status::BadRequest, e))
+                }
+            },
+            None => Outcome::Failure((Status::BadRequest, TokenError::Invalid))
+        }
+    }
+}
+
+#[get("/login")]
+fn login(authorize: Token)-> String {
+    authorize.0
+}
+
+fn main() {
+    initialize();
+    rocket::ignite().mount("/", routes![login]).launch();
+}
