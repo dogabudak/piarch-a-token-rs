@@ -9,6 +9,8 @@ use once_cell::sync::OnceCell;
 use mongodb::{bson::{Document,doc}, options::ClientOptions, sync::{Client,Database}};
 use serde::{Serialize, Deserialize};
 use jsonwebtoken::{encode, decode, Header, Algorithm, Validation, EncodingKey, DecodingKey};
+use chrono::prelude::*;
+
 static MONGODB: OnceCell<Database> = OnceCell::new();
 
 struct Token(String);
@@ -27,7 +29,7 @@ struct Claims {
     exp: usize,
 }
 
-pub fn initialize() {
+pub fn initializeDatabase() {
     if MONGODB.get().is_some() {
         return;
     }
@@ -40,17 +42,21 @@ pub fn initialize() {
 }
 fn create_token(username: String) -> String {
     let credential_sub = username.clone();
+    // TODO remove unwraps here
     let my_claims= Claims{sub:credential_sub,company: "piarch_a".parse().unwrap(), exp: 10 * 60 * 60};
     let token = encode(&Header::new(Algorithm::RS256), &my_claims, &EncodingKey::from_rsa_pem(include_bytes!("./piarch_a.pem")).unwrap()).unwrap();
     print!("{}",token.clone());
     return token;
 }
 fn validate_token(user: String, password: String) -> Result<String, TokenError> {
+    // TODO remove unwraps here
     let database = MONGODB.get().unwrap();
     let username = user.clone();
     let collection = database.collection::<Document>("users");
     let filter = doc! {"username": username};
-    let document = collection.find_one(filter,None).unwrap();
+    let utc: DateTime<Utc> = Utc::now();
+    // TODO maybe spawn a new thread here ?
+    let document = collection.find_one_and_update(filter,doc!{"$set" : {"lastLogin":utc } },None).unwrap();
     let db_result = return match document {
         Some(document) => {
             let token_sub = user.clone();
@@ -68,7 +74,7 @@ fn evaluate_credentials(credentials: &str) -> Result<String, TokenError> {
     if header_count as i32 != header_size {
         return Err(TokenError::BadCount)
     }
-
+    // TODO remove unwraps here
     let method = authorize_header.next().unwrap();
     let encoded_user_pass = authorize_header.next().unwrap();
 
@@ -112,6 +118,6 @@ fn login(authorize: Token)-> String {
 }
 
 fn main() {
-    initialize();
+    initializeDatabase();
     rocket::ignite().mount("/", routes![login]).launch();
 }
