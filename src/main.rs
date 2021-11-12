@@ -8,7 +8,7 @@ use rocket::request::{self, Request, FromRequest};
 use once_cell::sync::OnceCell;
 use mongodb::{bson::{Document,doc}, options::ClientOptions, sync::{Client,Database}};
 use serde::{Serialize, Deserialize};
-use jsonwebtoken::{encode, decode, Header, Algorithm, Validation, EncodingKey, DecodingKey};
+use jsonwebtoken::{encode, Header, Algorithm, EncodingKey};
 use chrono::prelude::*;
 
 static MONGODB: OnceCell<Database> = OnceCell::new();
@@ -18,7 +18,6 @@ struct Token(String);
 #[derive(Debug)]
 enum TokenError {
     BadCount,
-    Missing,
     Invalid,
 }
 // TODO split these functions into different module
@@ -29,7 +28,7 @@ struct Claims {
     exp: usize,
 }
 
-pub fn initializeDatabase() {
+pub fn initialize_database() {
     if MONGODB.get().is_some() {
         return;
     }
@@ -49,16 +48,23 @@ fn create_token(username: String) -> String {
     return token;
 }
 fn validate_token(user: String, password: String) -> Result<String, TokenError> {
-    // TODO remove unwraps here
-    let database = MONGODB.get().unwrap();
+    let database = match MONGODB.get(){
+        Some(v) => v,
+        None => {
+            // TODO this should be different error
+            return Err(TokenError::Invalid)
+        }
+    };
     let username = user.clone();
     let collection = database.collection::<Document>("users");
     let filter = doc! {"username": username};
     let utc: DateTime<Utc> = Utc::now();
-    // TODO maybe spawn a new thread here ?
-    let document = collection.find_one_and_update(filter,doc!{"$set" : {"lastLogin":utc } },None).unwrap();
-    let db_result = return match document {
-        Some(document) => {
+    let document = match collection.find_one_and_update(filter,doc!{"$set" : {"lastLogin":utc.to_string() } },None) {
+        Ok(v) => v,
+        Err(_) => None
+    };
+    return match document {
+        Some(_) => {
             let token_sub = user.clone();
             Ok(create_token(token_sub))
         },
@@ -118,6 +124,6 @@ fn login(authorize: Token)-> String {
 }
 
 fn main() {
-    initializeDatabase();
+    initialize_database();
     rocket::ignite().mount("/", routes![login]).launch();
 }
