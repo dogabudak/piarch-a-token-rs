@@ -32,7 +32,8 @@ pub fn initialize_database() {
     if MONGODB.get().is_some() {
         return;
     }
-    let connection_string= "mongodb://localhost:27017";
+    // TODO put this to config
+    let connection_string= "mongodb+srv://dogabudak:199100@piarkacluster.snpsj.mongodb.net/piarka?retryWrites=true&w=majority";
         if let Ok(client_options) =  ClientOptions::parse(connection_string) {
             if let Ok(client) = Client::with_options(client_options) {
                 let _ = MONGODB.set(client.database("piarka"));
