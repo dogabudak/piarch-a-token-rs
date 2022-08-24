@@ -1,7 +1,11 @@
+
+
 #![feature(proc_macro_hygiene, decl_macro)]
 
 #[macro_use] extern crate rocket;
 
+use std::env;
+use dotenv::dotenv;
 use rocket::Outcome;
 use rocket::http::Status;
 use rocket::request::{self, Request, FromRequest};
@@ -28,12 +32,11 @@ struct Claims {
     exp: usize,
 }
 
-pub fn initialize_database() {
+pub fn initialize_database(connection_string: String) {
     if MONGODB.get().is_some() {
         return;
     }
     // TODO put this to config
-    let connection_string= "mongodb+srv://dogabudak:199100@piarkacluster.snpsj.mongodb.net/piarka?retryWrites=true&w=majority";
         if let Ok(client_options) =  ClientOptions::parse(connection_string) {
             if let Ok(client) = Client::with_options(client_options) {
                 let _ = MONGODB.set(client.database("piarka"));
@@ -125,6 +128,11 @@ fn login(authorize: Token)-> String {
 }
 
 fn main() {
-    initialize_database();
+    dotenv().ok();
+    let connection_string = match env::var("MONGODB") {
+        Ok(v) => v,
+        Err(e) => panic!("MONGODB is not set ")
+    };
+    initialize_database(connection_string);
     rocket::ignite().mount("/", routes![login]).launch();
 }
