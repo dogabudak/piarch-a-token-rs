@@ -36,7 +36,6 @@ pub fn initialize_database(connection_string: String) {
     if MONGODB.get().is_some() {
         return;
     }
-    // TODO put this to config
         if let Ok(client_options) =  ClientOptions::parse(connection_string) {
             if let Ok(client) = Client::with_options(client_options) {
                 let _ = MONGODB.set(client.database("piarka"));
