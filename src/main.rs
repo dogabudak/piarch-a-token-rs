@@ -14,6 +14,7 @@ use mongodb::{bson::{Document,doc}, options::ClientOptions, sync::{Client,Databa
 use serde::{Serialize, Deserialize};
 use jsonwebtoken::{encode, Header, Algorithm, EncodingKey};
 use chrono::prelude::*;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 static MONGODB: OnceCell<Database> = OnceCell::new();
 
@@ -29,7 +30,7 @@ enum TokenError {
 struct Claims {
     sub: String,
     company: String,
-    exp: usize,
+    exp: u128,
 }
 
 pub fn initialize_database(connection_string: String) {
@@ -44,13 +45,17 @@ pub fn initialize_database(connection_string: String) {
 }
 fn create_token(username: String) -> String {
     let credential_sub = username.clone();
+    let start = SystemTime::now();
     // TODO remove unwraps here
-    let my_claims= Claims{sub:credential_sub,company: "piarch_a".parse().unwrap(), exp: 10 * 60 * 60};
+    let since_the_epoch = start
+        .duration_since(UNIX_EPOCH).unwrap().as_millis();
+    let my_claims= Claims{sub:credential_sub,company: "piarch_a".parse().unwrap(), exp: since_the_epoch};
+    // TODO remove unwraps here
     let token = encode(&Header::new(Algorithm::RS256), &my_claims, &EncodingKey::from_rsa_pem(include_bytes!("./piarch_a.pem")).unwrap()).unwrap();
     print!("{}",token.clone());
     return token;
 }
-fn validate_token(user: String, password: String) -> Result<String, TokenError> {
+fn validate_user(user: String, password: String) -> Result<String, TokenError> {
     let database = match MONGODB.get(){
         Some(v) => v,
         None => {
@@ -99,7 +104,7 @@ fn evaluate_credentials(credentials: &str) -> Result<String, TokenError> {
 
     let normalized_user = user.to_lowercase();
     let normalized_password = password.to_lowercase();
-    let result = validate_token(normalized_user,normalized_password);
+    let result = validate_user(normalized_user,normalized_password);
     Ok(result.unwrap())
 }
 
