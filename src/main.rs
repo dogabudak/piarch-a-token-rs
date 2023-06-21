@@ -14,7 +14,7 @@ use mongodb::{bson::{Document,doc}, options::ClientOptions, sync::{Client,Databa
 use serde::{Serialize, Deserialize};
 use jsonwebtoken::{encode, Header, Algorithm, EncodingKey};
 use chrono::prelude::*;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH, Duration};
 
 static MONGODB: OnceCell<Database> = OnceCell::new();
 
@@ -46,9 +46,8 @@ pub fn initialize_database(connection_string: String) {
 fn create_token(username: String) -> String {
     let credential_sub = username.clone();
     let start = SystemTime::now();
-    // TODO remove unwraps here
     let since_the_epoch = start
-        .duration_since(UNIX_EPOCH).unwrap().as_millis();
+        .duration_since(UNIX_EPOCH).unwrap_or(Duration::default()).as_millis();
     let my_claims= Claims{sub:credential_sub,company: "piarch_a".parse().unwrap(), exp: since_the_epoch};
     // TODO remove unwraps here
     let token = encode(&Header::new(Algorithm::RS256), &my_claims, &EncodingKey::from_rsa_pem(include_bytes!("./piarch_a.pem")).unwrap()).unwrap();
