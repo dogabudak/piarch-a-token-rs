@@ -25,6 +25,13 @@ enum TokenError {
     BadCount,
     Invalid,
 }
+
+#[derive(Debug)]
+enum Services {
+    Piarcha,
+    Unusual_Refugee,
+}
+
 // TODO split these functions into different module
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
@@ -43,18 +50,33 @@ pub fn initialize_database(connection_string: String) {
             }
         }
 }
-fn create_token(username: String) -> String {
+
+fn create_token(username: String, service: Services) -> String {
+    let company_name = if service == Services::Piarcha {
+        "piarch_a"
+    } else {
+        "unusual_refugee"
+    };
     let credential_sub = username.clone();
     let start = SystemTime::now();
     let since_the_epoch = start
         .duration_since(UNIX_EPOCH).unwrap_or(Duration::default()).as_millis();
-    let my_claims= Claims{sub:credential_sub,company: "piarch_a".parse().unwrap(), exp: since_the_epoch};
+    let my_claims= Claims{sub:credential_sub,company: company_name.parse().unwrap(), exp: since_the_epoch};
+
+    let pem_file = if service == Services::Piarcha {
+        include_bytes!("./piarch_a.pem")
+    } else {
+        include_bytes!("./unusual_refugee.pem")
+    };
+
     // TODO remove unwraps here
-    let token = encode(&Header::new(Algorithm::RS256), &my_claims, &EncodingKey::from_rsa_pem(include_bytes!("./piarch_a.pem")).unwrap()).unwrap();
+    let token = encode(&Header::new(Algorithm::RS256), &my_claims, &EncodingKey::from_rsa_pem(include_bytes!(pem_file)).unwrap()).unwrap();
     print!("{}",token.clone());
     return token;
 }
-fn validate_user(user: String, password: String) -> Result<String, TokenError> {
+
+//TODO use this services to go another db
+fn validate_user(user: String, password: String, service: Services) -> Result<String, TokenError> {
     let database = match MONGODB.get(){
         Some(v) => v,
         None => {
@@ -73,11 +95,12 @@ fn validate_user(user: String, password: String) -> Result<String, TokenError> {
     return match document {
         Some(_) => {
             let token_sub = user.clone();
-            Ok(create_token(token_sub))
+            Ok(create_token(token_sub, service))
         },
         _ => Err(TokenError::Invalid)
     };
 }
+
 fn evaluate_credentials(credentials: &str) -> Result<String, TokenError> {
 
     let mut authorize_header =  credentials.split( " ");
