@@ -2,18 +2,19 @@
 name = "piarch-a-token-rs"
 version = "0.1.0"
 authors = ["doga <dogabudak@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rocket = "0.4.7"
-async-std = "1.9.0"
+rocket = { version = "0.5", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
 once_cell = "1.7.2"
 jsonwebtoken = "7"
 chrono = "0.4"
 dotenv = "0.15.0"
 serde = {version = "1.0", features = ["derive"] }
+# Simple UDP client for StatsD - no external crate needed
 
 [dependencies.mongodb]
 version = "2.0.0-alpha.1"

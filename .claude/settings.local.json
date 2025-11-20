@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo:*)",
+      "Bash(rustc --version)",
+      "Bash(rustup:*)",
+      "Bash(rm:*)",
+      "Bash(chmod:*)",
+      "Bash(node test_statsd.js)",
+      "Bash(rg:*)"
+    ],
+    "deny": []
+  }
+}
