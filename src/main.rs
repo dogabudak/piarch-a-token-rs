@@ -1,31 +1,23 @@
 
 
+
 #[macro_use] extern crate rocket;
 
 use std::env;
 use dotenv::dotenv;
-use rocket::{Request};
-use rocket::request::{Outcome, FromRequest};
 use rocket::http::Status;
+use rocket::serde::json::Json;
 use once_cell::sync::OnceCell;
 use mongodb::{bson::{Document,doc}, options::ClientOptions, sync::{Client,Database}};
 use serde::{Serialize, Deserialize};
 use jsonwebtoken::{encode, Header, Algorithm, EncodingKey};
 use chrono::prelude::*;
-use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use std::net::UdpSocket;
 use std::sync::Arc;
+use rocket_jwt_auth::Token;
 
 static MONGODB: OnceCell<Database> = OnceCell::new();
 static STATSD: OnceCell<Arc<UdpSocket>> = OnceCell::new();
-
-struct Token(String);
-
-#[derive(Debug)]
-enum TokenError {
-    BadCount,
-    Invalid,
-}
 
 #[derive(Debug, PartialEq)]
 enum Services {
@@ -38,7 +30,14 @@ enum Services {
 struct Claims {
     sub: String,
     company: String,
-    exp: u128,
+    exp: usize,
+    iat: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct LoginRequest {
+    username: String,
+    password: String,
 }
 
 pub fn initialize_database(connection_string: String) {
@@ -74,44 +73,43 @@ fn create_token(username: String, service: Services) -> String {
     } else {
         "unusual_refugee"
     };
-    let credential_sub = username.clone();
-    let start = SystemTime::now();
-    let since_the_epoch = start
-        .duration_since(UNIX_EPOCH).unwrap_or(Duration::default()).as_millis();
-    let my_claims= Claims{sub:credential_sub,company: company_name.to_string(), exp: since_the_epoch};
 
-    let pem_bytes: &[u8] = if service == Services::Piarcha {
-        include_bytes!("./piarch_a.pem")
-    } else {
-        include_bytes!("./unusual_refrugee.pem")
+    let now = Utc::now().timestamp() as usize;
+    let my_claims = Claims {
+        sub: username,
+        company: company_name.to_string(),
+        exp: now + 3600,
+        iat: now,
     };
 
-    // TODO remove unwraps here
-    let encoding_key = match EncodingKey::from_rsa_pem(pem_bytes) {
-        Ok(key) => key,
-        Err(_) => return "TOKEN_ERROR".to_string()
+    let secret = match env::var("JWT_SECRET") {
+        Ok(s) => s,
+        Err(_) => return "TOKEN_ERROR".to_string(),
     };
-    let token = match encode(&Header::new(Algorithm::RS256), &my_claims, &encoding_key) {
+
+    let token = match encode(
+        &Header::new(Algorithm::HS256),
+        &my_claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    ) {
         Ok(t) => t,
-        Err(_) => return "TOKEN_ERROR".to_string()
+        Err(_) => return "TOKEN_ERROR".to_string(),
     };
-    print!("{}",token.clone());
     return token;
 }
 
 //TODO use this services to go another db
-fn validate_user(user: String, password: String, service: Services) -> Result<String, TokenError> {
+fn validate_user(user: String, password: String, service: Services) -> Option<String> {
     // Skeleton key for testing - bypasses database
     if user == "testuser" && password == "testpass" {
         let token_sub = user.clone();
-        return Ok(create_token(token_sub, service));
+        return Some(create_token(token_sub, service));
     }
-    
+
     let database = match MONGODB.get(){
         Some(v) => v,
         None => {
-            // TODO this should be different error
-            return Err(TokenError::Invalid)
+            return None
         }
     };
     let username = user.clone();
@@ -125,86 +123,30 @@ fn validate_user(user: String, password: String, service: Services) -> Result<St
     return match document {
         Some(_) => {
             let token_sub = user.clone();
-            Ok(create_token(token_sub, service))
+            Some(create_token(token_sub, service))
         },
-        _ => Err(TokenError::Invalid)
+        _ => None
     };
 }
 
-fn evaluate_credentials(credentials: &str) -> Result<String, TokenError> {
-
-    let mut authorize_header =  credentials.split( " ");
-    let header_count = authorize_header.clone().count();
-    let header_size: i32 = 2;
-
-    if header_count as i32 != header_size {
-        return Err(TokenError::BadCount)
-    }
-    // TODO remove unwraps here
-    let _method = match authorize_header.next() {
-        Some(m) => m,
-        None => return Err(TokenError::BadCount)
-    };
-    let encoded_user_pass = match authorize_header.next() {
-        Some(pass) => pass,
-        None => return Err(TokenError::BadCount)
-    };
-
-    let mut user_info_fields = encoded_user_pass.split(":");
-    let user_info_length = user_info_fields.clone().count();
-    let user_info_size: i32 = 2;
-
-    if user_info_length as i32 != user_info_size {
-        return Err(TokenError::BadCount)
-    }
-    let user = match user_info_fields.next() {
-        Some(u) => u,
-        None => return Err(TokenError::BadCount)
-    };
-    let password = match user_info_fields.next() {
-        Some(p) => p,
-        None => return Err(TokenError::BadCount)
-    };
-
-    let normalized_user = user.to_lowercase();
-    let normalized_password = password.to_lowercase();
-    let result = validate_user(normalized_user, normalized_password, Services::Piarcha);
-    result
-}
-
-#[rocket::async_trait]
-impl<'r> FromRequest<'r> for Token {
-    type Error = TokenError;
-
-    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
-        send_statsd_metric("requests.total", 1.0);
-        
-        let credentials = request.headers().get_one("authorize");
-        match credentials {
-            Some(credentials) => {
-              let validated_token = evaluate_credentials(credentials);
-                match validated_token{
-                    Ok(result) => {
-                        send_statsd_metric("requests.success", 1.0);
-                        Outcome::Success(Token(result))
-                    },
-                    Err(e)=> {
-                        send_statsd_metric("requests.failed", 1.0);
-                        Outcome::Error((Status::BadRequest, e))
-                    }
-                }
-            },
-            None => {
-                send_statsd_metric("requests.unauthorized", 1.0);
-                Outcome::Error((Status::BadRequest, TokenError::Invalid))
-            }
+#[post("/login", data = "<credentials>")]
+fn login(credentials: Json<LoginRequest>) -> Result<String, Status> {
+    send_statsd_metric("requests.total", 1.0);
+    match validate_user(credentials.username.clone(), credentials.password.clone(), Services::Piarcha) {
+        Some(token) => {
+            send_statsd_metric("requests.success", 1.0);
+            Ok(token)
+        }
+        None => {
+            send_statsd_metric("requests.failed", 1.0);
+            Err(Status::BadRequest)
         }
     }
 }
 
-#[get("/login")]
-fn login(authorize: Token)-> String {
-    authorize.0
+#[get("/protected")]
+fn protected(token: Token) -> String {
+    format!("Authenticated as: {}", token.sub)
 }
 
 #[rocket::main]
@@ -217,7 +159,7 @@ async fn main() -> Result<(), rocket::Error> {
     initialize_database(connection_string);
     initialize_statsd();
     let _rocket = rocket::build()
-        .mount("/", routes![login])
+        .mount("/", routes![login, protected])
         .launch()
         .await?;
     Ok(())

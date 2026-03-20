@@ -1,5 +1,4 @@
 .env
 debug/
 target/
-.idea/
 Cargo.lock
