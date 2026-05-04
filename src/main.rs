@@ -213,6 +213,11 @@ fn protected(token: Token) -> String {
     format!("Authenticated as: {} from company: {}", token.sub, token.company)
 }
 
+#[get("/health")]
+fn health() -> &'static str {
+    "ok"
+}
+
 #[rocket::main]
 async fn main() -> Result<(), rocket::Error> {
     dotenv().ok();
@@ -223,7 +228,7 @@ async fn main() -> Result<(), rocket::Error> {
     }
     initialize_statsd();
     let _rocket = rocket::build()
-        .mount("/", routes![login, protected])
+        .mount("/", routes![login, protected, health])
         .launch()
         .await?;
     Ok(())

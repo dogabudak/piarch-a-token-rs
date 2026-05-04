@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: piarch-a-token-rs
+    runtime: docker
+    repo: https://github.com/dogabudak/piarch-a-token-rs
+    region: frankfurt
+    plan: starter
+    branch: main
+    healthCheckPath: /health
+    envVars:
+      - key: MONGODB
+        sync: false
+      - key: PIARCH_A_PEM
+        sync: false
+      - key: UNUSUAL_REFRUGEE_PEM
+        sync: false
+      - key: YESILDOGA_PEM
+        sync: false
