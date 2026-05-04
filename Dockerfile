@@ -20,7 +20,6 @@ WORKDIR /app
 
 COPY --from=builder /usr/src/app/target/release/piarch-a-token-rs .
 COPY keys/ ./keys/
-COPY src/*.pem ./src/
 
 EXPOSE 10000
 

@@ -64,10 +64,9 @@ impl<'r> rocket::request::FromRequest<'r> for Token {
             None => return rocket::request::Outcome::Error((Status::Unauthorized, ())),
         };
 
-        let pub_key_path = format!("keys/{}.pub", kid);
-        let pub_key_content = match std::fs::read_to_string(&pub_key_path) {
-            Ok(c) => c,
-            Err(_) => return rocket::request::Outcome::Error((Status::Unauthorized, ())),
+        let pub_key_content = match get_pub_content(&kid) {
+            Some(c) => c,
+            None => return rocket::request::Outcome::Error((Status::Unauthorized, ())),
         };
 
         let decoding_key = match jsonwebtoken::DecodingKey::from_rsa_pem(pub_key_content.as_bytes()) {
@@ -115,6 +114,30 @@ fn send_statsd_metric(metric: &str, value: f64) {
     }
 }
 
+fn get_pem_content(company_name: &str) -> Option<String> {
+    // Try env var first (production), fall back to file (local dev)
+    let env_key = format!("{}_PEM", company_name.to_uppercase());
+    if let Ok(pem) = env::var(&env_key) {
+        if !pem.is_empty() {
+            return Some(pem.replace("\\n", "\n"));
+        }
+    }
+    let key_path = format!("src/{}.pem", company_name);
+    std::fs::read_to_string(&key_path).ok()
+}
+
+fn get_pub_content(company_name: &str) -> Option<String> {
+    // Try env var first (production), fall back to file (local dev)
+    let env_key = format!("{}_PUB", company_name.to_uppercase());
+    if let Ok(pub_key) = env::var(&env_key) {
+        if !pub_key.is_empty() {
+            return Some(pub_key.replace("\\n", "\n"));
+        }
+    }
+    let key_path = format!("keys/{}.pub", company_name);
+    std::fs::read_to_string(&key_path).ok()
+}
+
 fn create_token(username: String, service: Services) -> String {
     let company_name = match service {
         Services::Piarcha => "piarch_a",
@@ -130,10 +153,9 @@ fn create_token(username: String, service: Services) -> String {
         iat: now,
     };
 
-    let key_path = format!("src/{}.pem", company_name);
-    let key_content = match std::fs::read_to_string(&key_path) {
-        Ok(s) => s,
-        Err(_) => return "TOKEN_ERROR".to_string(),
+    let key_content = match get_pem_content(company_name) {
+        Some(s) => s,
+        None => return "TOKEN_ERROR".to_string(),
     };
 
     let encoding_key = match EncodingKey::from_rsa_pem(key_content.as_bytes()) {
