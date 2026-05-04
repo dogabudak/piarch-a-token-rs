@@ -23,5 +23,4 @@ COPY keys/ ./keys/
 
 EXPOSE 10000
 
-# Map Render's PORT env var to Rocket's config
-CMD ROCKET_PORT=${PORT:-10000} ROCKET_ADDRESS=0.0.0.0 ./piarch-a-token-rs
+CMD ["./piarch-a-token-rs"]

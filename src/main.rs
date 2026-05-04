@@ -249,7 +249,17 @@ async fn main() -> Result<(), rocket::Error> {
         initialize_database(connection_string);
     }
     initialize_statsd();
-    let _rocket = rocket::build()
+
+    let port: u16 = env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8000);
+
+    let figment = rocket::Config::figment()
+        .merge(("address", "0.0.0.0"))
+        .merge(("port", port));
+
+    let _rocket = rocket::custom(figment)
         .mount("/", routes![login, protected, health])
         .launch()
         .await?;
